@@ -44,7 +44,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             line: &line,
                             message: &line[capture.get(0).unwrap().end()..].trim(),
                             help_message: &format!(
-                                "link: https://github.com/tangmi/cargo-report-todo/issues/{}",
+                                "link: https://github.com/tangmi/report-todo/issues/{}",
                                 capture.get(1).unwrap().as_str()
                             ),
                         }
