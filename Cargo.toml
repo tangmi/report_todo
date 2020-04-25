@@ -13,6 +13,8 @@ ignore = "0.4"
 # futures = "0.3"
 # num_cpus = "1"
 termcolor = "1.1"
-
 pest = "2.1"
 pest_derive = "2.1"
+structopt = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.5"

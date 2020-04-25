@@ -1,0 +1,6 @@
+with_issue_regex = '''todo\(#(?P<issue_number>\d+)\):'''
+with_issue_replace = 'https://github.com/tangmi/report-todo/issues/${issue_number}'
+todo_keywords = [
+    '''todo''',
+    '''fixme''',
+]
