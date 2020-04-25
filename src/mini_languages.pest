@@ -1,0 +1,31 @@
+// This grammar file makes a best attempt at parsing the bare minimum needed to extract comments from many different programming languages.
+
+hash_line_comment = { ("#" ~ (!NEWLINE ~ ANY)*) }
+c_line_comment = { ("//" ~ (!NEWLINE ~ ANY)*) }
+c_string_literal = { "\"" ~ ("\\\"" | (!"\"" ~ ANY))* ~ "\"" }
+block_comment_unnested = { "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+block_comment_nested = { "/*" ~ (block_comment_nested | !"*/" ~ ANY)* ~ "*/" }
+
+// TODO: Rust supports raw string literals with `r#""#`, which allows unescaped `"` inside.
+rust_file_comment = @{ block_comment_nested | c_line_comment }
+rust_todo_macro = { "todo!" ~ ("(" ~ c_string_literal ~ ")")? }
+rust_file = {
+    SOI ~
+    (rust_file_comment | rust_todo_macro | c_string_literal | ANY)* ~
+    EOI
+}
+
+c_file_comment = @{ block_comment_unnested | c_line_comment }
+c_file = {
+    SOI ~
+    (c_file_comment | c_string_literal | ANY)* ~
+    EOI
+}
+
+toml_file = {
+    SOI ~
+    (hash_line_comment | c_string_literal | ANY)* ~
+    EOI
+}
+
+WHITESPACE = _{ " " | "\t" }
