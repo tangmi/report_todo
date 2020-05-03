@@ -70,6 +70,11 @@ impl std::str::FromStr for ReportKind {
     }
 }
 
+/// Struct to keep track of `syntect`'s scopes and to emit substrings that are comments.
+///
+/// Note: this + the syntect parser could be combined into a single iterator. the syntect ScopeStackOps would have to be staged and only processed when another comment is requested.
+///
+/// TODO refactor to allow multiple scopes to scan for?
 struct CommentScopeStack<'a> {
     /// original text that's being parsed
     original: Span<'a>,
