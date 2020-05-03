@@ -30,7 +30,11 @@ struct Config {
 
     #[structopt(long = "match")]
     todo_keywords: Vec<String>,
-    // TODO: add ignore directories?
+    // TODO: add ignore directories/files?
+    // TODO: add custom sublime-syntax files?
+    // TODO: show all, or just keywords
+    // TODO: json output? ide-friendly output?
+    // TODO: warnings or errors? return code?
 }
 
 struct CommentScopeStack<'a> {
