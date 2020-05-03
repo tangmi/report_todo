@@ -7,5 +7,6 @@ authors = [
     "Michael Tang <tangmi@uw.edu>",
 ]
 edition = "2015"
+license = "MIT/Apache-2.0"
 
 [dependencies]

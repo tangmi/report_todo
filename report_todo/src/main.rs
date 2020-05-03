@@ -9,6 +9,7 @@ mod todo_error;
 use todo_error::Regexes;
 use todo_error::TodoError;
 
+/// Will ignore files listed in `.todoignore` and `.gitignore`.
 #[derive(Debug, StructOpt)]
 struct Opt {
     #[structopt(flatten)]
@@ -22,19 +23,51 @@ struct Opt {
 struct Config {
     /// Regex to detect a valid TODO with issue number. e.g. `todo\(#(?P<issue_number>\d+)\):`
     #[structopt(long = "match-issue")]
-    with_issue_regex: String,
+    match_issue: String,
 
-    /// Regex replace string used to format the output link. e.g. `https://github.com/tangmi/report-todo/issues/${issue_number}`
+    /// Regex replace string used to format the output link. e.g. `https://github.com/tangmi/report_todo/issues/${issue_number}`
     #[structopt(long = "issue-link-format")]
-    with_issue_replace: String,
+    issue_link_format: String,
 
-    #[structopt(long = "match")]
-    todo_keywords: Vec<String>,
-    // TODO: add ignore directories/files?
+    /// Expected to match `\w+`.
+    #[structopt(long = "forbid")]
+    forbidden_keywords: Vec<String>,
+
+    /// Can be `Untracked` (show only matches for forbidden keywords) or `All` (show tracked issues as well)
+    #[structopt(long = "report")]
+    report_kind: ReportKind,
     // TODO: add custom sublime-syntax files?
-    // TODO: show all, or just keywords
     // TODO: json output? ide-friendly output?
     // TODO: warnings or errors? return code?
+}
+
+#[derive(Debug, StructOpt, Serialize, Deserialize, Copy, Clone)]
+enum ReportKind {
+    /// Report tracked issues and forbidden keywords
+    All,
+
+    /// Report only forbidden keywords
+    Untracked,
+}
+
+#[derive(Debug)]
+struct ParseReportKindError;
+
+impl std::string::ToString for ParseReportKindError {
+    fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
+}
+
+impl std::str::FromStr for ReportKind {
+    type Err = ParseReportKindError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "All" => Ok(ReportKind::All),
+            "Untracked" => Ok(ReportKind::Untracked),
+            _ => Err(ParseReportKindError),
+        }
+    }
 }
 
 struct CommentScopeStack<'a> {
@@ -138,7 +171,8 @@ impl<'a> CommentScopeStack<'a> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // let opt = Opt::from_args(); // TODO
+    // TODO try finding a config file in current directory first
+    // let opt = Opt::from_args();
 
     let opt = Opt {
         // Global conifg? `dirs::config_dir`?
@@ -150,13 +184,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let config = Regexes {
-        with_issue: regex::RegexBuilder::new(&format!(r"\b{}", opt.config.with_issue_regex))
+        match_issue: regex::RegexBuilder::new(&format!(r"\b{}", opt.config.match_issue))
             .case_insensitive(true)
             .build()?,
-        with_issue_replace: opt.config.with_issue_replace,
+        issue_link_format: opt.config.issue_link_format.clone(),
         bad_keywords: opt
             .config
-            .todo_keywords
+            .forbidden_keywords
             .iter()
             .map(|keyword| {
                 regex::RegexBuilder::new(&format!(r"\b{}\b", keyword))
@@ -168,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut stderr = console_emitter::ColoredWriter::new();
 
-    let ps = {
+    let syntax_set = {
         const LINES_INCLUDE_NEWLINE: bool = true;
         let mut builder = if LINES_INCLUDE_NEWLINE {
             syntect::parsing::SyntaxSet::load_defaults_newlines()
@@ -191,38 +225,78 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         builder.build()
     };
 
-    for entry in ignore::Walk::new(&opt.root_dir) {
-        let entry = entry?;
-
+    let mut has_untracked = false;
+    let mut issues_found_count = 0;
+    for entry in ignore::WalkBuilder::new(&opt.root_dir)
+        .add_custom_ignore_filename(".todoignore")
+        .build()
+    {
+        let entry = entry.expect("walking directory entry should not have i/o errors");
         let file_path = entry.path();
-        dbg!(file_path);
-
         if file_path.is_file() {
-            if let Some(syntax_ref) = ps.find_syntax_for_file(entry.path())? {
+            if let Some(syntax_ref) = syntax_set
+                .find_syntax_for_file(entry.path())
+                .expect("opening source file should work")
+            {
                 let mut state = syntect::parsing::ParseState::new(syntax_ref);
 
                 let file_contents = std::fs::read_to_string(file_path)?;
                 let file_span = Span::new(&file_contents, 0, file_contents.len()).unwrap();
                 let mut stack = CommentScopeStack::new(file_span.clone());
                 for line in file_span.lines_span() {
+                    // TODO capture usages of `todo!()` macro in rust?
                     for todo_error in stack
                         .process_ops_for_line(
-                            state.parse_line(line.as_str(), &ps).into_iter(),
+                            state.parse_line(line.as_str(), &syntax_set).into_iter(),
                             line,
                         )
                         .into_iter()
                         .flat_map(|comment| {
                             TodoError::from_comment(&config, file_path, comment).into_iter()
                         })
+                        .filter(|todo_error| match opt.config.report_kind {
+                            ReportKind::Untracked => {
+                                if !todo_error.is_tracked() {
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                            ReportKind::All => true,
+                        })
                     {
                         stderr.write_error(&todo_error)?;
+                        issues_found_count += 1;
+
+                        if !todo_error.is_tracked() {
+                            has_untracked = true;
+                        }
                     }
                 }
             } else {
-                eprintln!("NO SYNTAX FOUND FOR: {:?}", entry.path());
+                eprintln!("Ignoring file: {:?}. No syntax set found.", entry.path());
             }
         }
     }
 
+    if issues_found_count > 0 {
+        eprintln!("{} issues found.", issues_found_count)
+    }
+
+    if has_untracked {
+        Err(UntrackedIssuesFoundError)?;
+    }
+
     Ok(())
 }
+
+#[derive(Debug)]
+struct UntrackedIssuesFoundError;
+
+impl std::fmt::Display for UntrackedIssuesFoundError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "untracked issues found!")
+    }
+}
+
+impl std::error::Error for UntrackedIssuesFoundError {}

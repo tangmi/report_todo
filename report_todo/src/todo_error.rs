@@ -6,10 +6,10 @@ use std::path::Path;
 #[derive(Debug)]
 pub struct Regexes {
     /// Expects a single capture
-    pub with_issue: Regex,
+    pub match_issue: Regex,
 
     /// Expects a single string interpolation (`{replace_name}`) in which the capture from
-    pub with_issue_replace: String,
+    pub issue_link_format: String,
 
     /// List of regexes of forbidden words
     pub bad_keywords: Vec<Regex>,
@@ -35,6 +35,10 @@ pub struct TodoError<'a> {
 }
 
 impl<'a> TodoError<'a> {
+    pub fn is_tracked(&self) -> bool {
+        matches!(self.level, Level::Todo(_))
+    }
+
     /// `comment` is potentially multiline.
     pub fn from_comment(
         config: &Regexes,
@@ -43,10 +47,11 @@ impl<'a> TodoError<'a> {
     ) -> Vec<TodoError<'a>> {
         let mut issues = Vec::new();
 
-        for line in comment.lines_span() {
-            if let Some(capture) = config.with_issue.captures(line.as_str()) {
-                // ok todo
-
+        for line in comment
+            .lines_span()
+            .filter(|line| !line.as_str().trim().is_empty())
+        {
+            if let Some(capture) = config.match_issue.captures(line.as_str()) {
                 let (todo_start_index, todo_end_index) = {
                     let m = capture.get(0).unwrap();
                     (m.start(), m.end())
@@ -67,23 +72,21 @@ impl<'a> TodoError<'a> {
                     help_message: format!(
                         "link: {}",
                         config
-                            .with_issue
-                            .replace(todo_substr, config.with_issue_replace.as_str())
+                            .match_issue
+                            .replace(todo_substr, config.issue_link_format.as_str())
                             .trim()
                     ),
                 });
             } else {
                 for keyword in &config.bad_keywords {
                     if let Some(m) = keyword.find(line.as_str()) {
-                        // bad todo
-
                         issues.push(TodoError {
                             level: Level::Error,
                             span: line.sub_span(m.start()..).unwrap(),
                             file_path,
-                            message: format!("{} detected without issue number", m.as_str().to_uppercase()),
+                            message: format!("{} found without issue number", m.as_str().to_uppercase()),
 
-                            // Try and generate an example from `config.with_issue` regex?
+                            // Try and generate an example from `config.match_issue` regex?
                             help_message: "help: create a work item and reference it here (e.g. `TODO(#1): ...`)".to_owned(),
                         });
                     }
