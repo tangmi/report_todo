@@ -1,0 +1,11 @@
+[package]
+name = "span"
+description = "The Span and Position portion of the pest crate."
+version = "2.1.3"
+authors = [
+    "Dragoș Tiselice <dragostiselice@gmail.com>",
+    "Michael Tang <tangmi@uw.edu>",
+]
+edition = "2015"
+
+[dependencies]

@@ -1,20 +1,2 @@
-[package]
-name = "report_todo"
-version = "0.1.0"
-authors = ["Michael Tang <tangmi@uw.edu>"]
-edition = "2018"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[dependencies]
-regex = "1"
-ignore = "0.4"
-# todo: hello
-# async-std = { version = "1", features = ["attributes"] }
-# futures = "0.3"
-# num_cpus = "1"
-termcolor = "1.1"
-pest = "2.1"
-pest_derive = "2.1"
-structopt = "0.3"
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.5"
+[workspace]
+members = ["report_todo", "span"]
