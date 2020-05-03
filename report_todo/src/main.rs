@@ -19,9 +19,12 @@ struct Opt {
     root_dir: PathBuf,
 }
 
+// TODO(#7): add custom sublime-syntax files?
+// TODO(#6): json output? ide-friendly output?
+// TODO(#6): find todo by tracking number
 #[derive(Debug, StructOpt, Serialize, Deserialize)]
 struct Config {
-    /// Regex to detect a valid TODO with issue number. e.g. `todo\(#(?P<issue_number>\d+)\):`
+    /// Regex to detect an issue with tracking idenfitied (i.e. GitHub issue number). e.g. `todo\(#(?P<issue_number>\d+)\):`
     #[structopt(long = "match-issue")]
     match_issue: String,
 
@@ -36,9 +39,6 @@ struct Config {
     /// Can be `Untracked` (show only matches for forbidden keywords) or `All` (show tracked issues as well)
     #[structopt(long = "report")]
     report_kind: ReportKind,
-    // TODO: add custom sublime-syntax files?
-    // TODO: json output? ide-friendly output?
-    // TODO: warnings or errors? return code?
 }
 
 #[derive(Debug, StructOpt, Serialize, Deserialize, Copy, Clone)]
@@ -72,9 +72,8 @@ impl std::str::FromStr for ReportKind {
 
 /// Struct to keep track of `syntect`'s scopes and to emit substrings that are comments.
 ///
-/// Note: this + the syntect parser could be combined into a single iterator. the syntect ScopeStackOps would have to be staged and only processed when another comment is requested.
-///
-/// TODO refactor to allow multiple scopes to scan for?
+/// TODO(#5): this + the syntect parser could be combined into a single iterator. the syntect ScopeStackOps would have to be staged and only processed when another comment is requested.
+/// TODO(#4): refactor to allow multiple scopes to scan for?
 struct CommentScopeStack<'a> {
     /// original text that's being parsed
     original: Span<'a>,
@@ -102,7 +101,7 @@ impl<'a> CommentScopeStack<'a> {
 
     /// Returns any comments that were finished in `ops`. This means it does not nessecarily return the comment if it appears in the current line and may return the comment in a subsequent line.
     ///
-    /// TODO should "get comments" be a callback?
+    /// TODO(#5): should "get comments" be a callback?
     ///
     /// Note: we need to pass the original line because syntect doesn't preserve mappings to the original source.
     fn process_ops_for_line(
@@ -176,7 +175,7 @@ impl<'a> CommentScopeStack<'a> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // TODO try finding a config file in current directory first
+    // TODO(#6): try finding a config file in current directory first
     // let opt = Opt::from_args();
 
     let opt = Opt {
@@ -216,7 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         .into_builder();
         // Use this instead of `add_from_folder` to compile the syntaxes into the program.
-        // TODO create separate dump? https://github.com/trishume/syntect/blob/master/src/dumps.rs
+        // TODO(#7): create separate dump? https://github.com/trishume/syntect/blob/master/src/dumps.rs
         builder.add(
             syntect::parsing::syntax_definition::SyntaxDefinition::load_from_str(
                 include_str!(concat!(
@@ -249,7 +248,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let file_span = Span::new(&file_contents, 0, file_contents.len()).unwrap();
                 let mut stack = CommentScopeStack::new(file_span.clone());
                 for line in file_span.lines_span() {
-                    // TODO capture usages of `todo!()` macro in rust?
+                    // TODO(#4): capture usages of `todo!()` macro in rust?
                     for todo_error in stack
                         .process_ops_for_line(
                             state.parse_line(line.as_str(), &syntax_set).into_iter(),

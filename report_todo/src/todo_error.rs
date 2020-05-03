@@ -66,8 +66,6 @@ impl<'a> TodoError<'a> {
                     level: Level::Todo(capture.get(1).unwrap().as_str()),
                     span: line.sub_span(todo_start_index..).unwrap(),
                     file_path,
-
-                    // TODO span updates https://github.com/pest-parser/pest/issues/455
                     message: line.as_str()[todo_end_index + 1..].trim().to_owned(),
                     help_message: format!(
                         "link: {}",
@@ -86,7 +84,7 @@ impl<'a> TodoError<'a> {
                             file_path,
                             message: format!("{} found without issue number", m.as_str().to_uppercase()),
 
-                            // Try and generate an example from `config.match_issue` regex?
+                            // TODO(#7): Try and generate an example from `config.match_issue` regex?
                             help_message: "help: create a work item and reference it here (e.g. `TODO(#1): ...`)".to_owned(),
                         });
                     }
@@ -114,7 +112,7 @@ impl ColoredWriter {
             Level::Warning => self.write("warning", Style::Warning)?,
             Level::Error => self.write("error", Style::Error)?,
 
-            // TODO find a way to preserve user-configured pattern?
+            // TODO(#7): find a way to preserve user-configured pattern?
             Level::Todo(issue) => self.write(format!("TODO(#{})", issue), Style::Info)?,
         }
         self.write(format!(": {}\n", todo.message), Style::Bold)?;
