@@ -1,30 +1,17 @@
 //! Inspect all files in a source tree and use `syntect` to only parse comments.
 
-use std::path::PathBuf;
+use std::{
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 
+use ignore::{DirEntry, WalkState};
 use log::debug;
 use span::Span;
 
 use crate::todo_error::{Regexes, TodoError};
 
 use super::Checker;
-
-/// Struct to keep track of `syntect`'s scopes and to emit substrings that are comments.
-///
-/// TODO(#5): this + the syntect parser could be combined into a single iterator. the syntect ScopeStackOps would have to be staged and only processed when another comment is requested.
-/// TODO(#4): refactor to allow multiple scopes to scan for?
-struct CommentScopeStack<'a> {
-    /// original text that's being parsed
-    original: Span<'a>,
-
-    current_comment_start: Option<usize>,
-    comment_level: usize,
-
-    prefix_scope: syntect::parsing::Scope,
-
-    scopes_stack: Vec<syntect::parsing::Scope>,
-    cleared_scopes_stack: Vec<Vec<syntect::parsing::Scope>>,
-}
 
 // TODO(#4): capture usages of `todo!()` macro in rust?
 struct ScopeTracker<'a> {
@@ -104,6 +91,23 @@ impl<'a> Iterator for ScopeTracker<'a> {
             todo!()
         }
     }
+}
+
+/// Struct to keep track of `syntect`'s scopes and to emit substrings that are comments.
+///
+/// TODO(#5): this + the syntect parser could be combined into a single iterator. the syntect ScopeStackOps would have to be staged and only processed when another comment is requested.
+/// TODO(#4): refactor to allow multiple scopes to scan for?
+struct CommentScopeStack<'a> {
+    /// original text that's being parsed
+    original: Span<'a>,
+
+    current_comment_start: Option<usize>,
+    comment_level: usize,
+
+    prefix_scope: syntect::parsing::Scope,
+
+    scopes_stack: Vec<syntect::parsing::Scope>,
+    cleared_scopes_stack: Vec<Vec<syntect::parsing::Scope>>,
 }
 
 impl<'a> CommentScopeStack<'a> {
@@ -193,13 +197,13 @@ impl<'a> CommentScopeStack<'a> {
     }
 }
 
-pub struct SourceTreeChecker {
+pub struct SourceTreeSyntectChecker {
     pub root_dir: PathBuf,
 }
 
-impl Checker for SourceTreeChecker {
+impl Checker for SourceTreeSyntectChecker {
     fn process_spans(&self, config: &Regexes) -> anyhow::Result<Vec<TodoError>> {
-        let mut todo_errors = Vec::new();
+        let todo_errors = Arc::new(Mutex::new(Vec::new()));
 
         let syntax_set = {
             const LINES_INCLUDE_NEWLINE: bool = true;
@@ -224,39 +228,55 @@ impl Checker for SourceTreeChecker {
             builder.build()
         };
 
-        for entry in ignore::WalkBuilder::new(&self.root_dir)
+        let num_threads = num_cpus::get() - 2;
+        debug!("Using {} threads", num_threads);
+
+        ignore::WalkBuilder::new(&self.root_dir)
             .add_custom_ignore_filename(".todoignore")
-            .build()
-        {
-            let entry = entry.expect("walking directory entry should not have i/o errors");
-            let file_path = entry.path();
-            if file_path.is_file() {
-                if let Some(syntax_ref) = syntax_set
-                    .find_syntax_for_file(entry.path())
-                    .expect("opening source file should work")
-                {
-                    let mut state = syntect::parsing::ParseState::new(syntax_ref);
+            .threads(num_threads)
+            .build_parallel()
+            .run(|| {
+                let todo_errors = todo_errors.clone();
+                let syntax_set = syntax_set.clone();
 
-                    let file_contents = std::fs::read_to_string(file_path)?;
-                    let file_span = Span::new(&file_contents, 0, file_contents.len()).unwrap();
-                    let mut stack = CommentScopeStack::new(file_span.clone());
-                    for line in file_span.lines_span() {
-                        todo_errors.extend(
-                            stack
-                                .process_ops_for_line(
-                                    state.parse_line(line.as_str(), &syntax_set).into_iter(),
-                                    line,
-                                )
-                                .into_iter()
-                                .flat_map(|span| TodoError::from_comment(config, file_path, span)),
-                        );
+                Box::new(move |entry| {
+                    let entry = entry.expect("walking directory entry should not have i/o errors");
+                    let file_path = entry.path();
+                    if file_path.is_file() {
+                        if let Ok(Some(syntax_ref)) = syntax_set.find_syntax_for_file(entry.path())
+                        {
+                            debug!("working on {}", file_path.display());
+
+                            let mut state = syntect::parsing::ParseState::new(syntax_ref);
+
+                            let file_contents = std::fs::read_to_string(file_path).unwrap();
+                            let file_span =
+                                Span::new(&file_contents, 0, file_contents.len()).unwrap();
+                            let mut stack = CommentScopeStack::new(file_span.clone());
+                            for line in file_span.lines_span() {
+                                todo_errors.lock().unwrap().extend(
+                                    stack
+                                        .process_ops_for_line(
+                                            state
+                                                .parse_line(line.as_str(), &syntax_set)
+                                                .into_iter(),
+                                            line,
+                                        )
+                                        .into_iter()
+                                        .flat_map(|span| {
+                                            TodoError::from_comment(config, file_path, span)
+                                        }),
+                                );
+                            }
+                        } else {
+                            debug!("Ignoring file: {:?}. No syntax set found.", entry.path());
+                        }
                     }
-                } else {
-                    debug!("Ignoring file: {:?}. No syntax set found.", entry.path());
-                }
-            }
-        }
 
-        Ok(todo_errors)
+                    WalkState::Continue
+                })
+            });
+
+        Ok(Arc::try_unwrap(todo_errors).unwrap().into_inner().unwrap())
     }
 }

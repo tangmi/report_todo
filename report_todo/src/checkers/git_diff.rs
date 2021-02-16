@@ -1,10 +1,9 @@
 //! Find TODOs in the diff since the fork point.
 
-use std::{collections::VecDeque, iter::Peekable, ops::Range, path::PathBuf, str::Lines};
+use std::{iter::Peekable, ops::Range, path::PathBuf, str::Lines};
 
 use anyhow::{anyhow, Context};
 use log::debug;
-use span::Span;
 
 use crate::todo_error::{Regexes, TodoError};
 

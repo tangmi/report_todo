@@ -1,9 +1,12 @@
 use anyhow::anyhow;
-use checkers::{git_diff::GitDiffChecker, source_tree::SourceTreeChecker, Checker};
+use checkers::{
+    git_diff::GitDiffChecker, source_tree_simple::SourceTreeSimpleChecker,
+    source_tree_syntect::SourceTreeSyntectChecker, Checker,
+};
+use log::debug;
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use structopt::StructOpt;
-use thiserror::Error;
 
 mod checkers;
 mod console_emitter;
@@ -22,6 +25,10 @@ struct Opt {
 
     #[structopt(name = "ROOT_DIR")]
     root_dir: Option<PathBuf>,
+
+    /// Use syntect to parse just comments.
+    #[structopt(long, hidden = true)]
+    use_syntect: bool,
 }
 
 // TODO(#7): add custom sublime-syntax files?
@@ -97,9 +104,16 @@ fn main() -> anyhow::Result<()> {
     let checker: Box<dyn Checker> = if opt.parse_diff {
         Box::new(GitDiffChecker {})
     } else {
-        Box::new(SourceTreeChecker {
-            root_dir: opt.root_dir.unwrap_or(PathBuf::from(".")),
-        })
+        if opt.use_syntect {
+            debug!("using syntect-based source tree checker");
+            Box::new(SourceTreeSyntectChecker {
+                root_dir: opt.root_dir.unwrap_or(PathBuf::from(".")),
+            })
+        } else {
+            Box::new(SourceTreeSimpleChecker {
+                root_dir: opt.root_dir.unwrap_or(PathBuf::from(".")),
+            })
+        }
     };
 
     for todo_error in checker
