@@ -110,7 +110,10 @@ impl<'a> UnifiedDiffParser<'a> {
 
     fn eat_file_header(&mut self) -> anyhow::Result<()> {
         loop {
-            let line = self.lines.peek().context("next line exists")?;
+            let line = self
+                .lines
+                .peek()
+                .context("before reading file header: next line exists")?;
             if line.starts_with("--- ") || line.starts_with("+++ ") {
                 break;
             } else {
@@ -130,13 +133,17 @@ impl<'a> UnifiedDiffParser<'a> {
         }
 
         self.current_file = target_file_line.strip_prefix("+++ b/").unwrap();
+        debug!("Read added file: {}", self.current_file);
 
         Ok(())
     }
 
     fn read_hunk(&mut self) -> anyhow::Result<Hunk> {
         // @@ -26,0 +27,6 @@ dependencies = [
-        let line = self.lines.next().context("next line exists")?;
+        let line = self
+            .lines
+            .next()
+            .context("before reading hunk: next line exists")?;
 
         let mut parts = line
             .strip_prefix("@@ ")
@@ -207,13 +214,19 @@ impl<'a> UnifiedDiffParser<'a> {
             hunk.added.push(ChangedLine { line, row })
         }
 
-        if self
-            .lines
-            .peek()
-            .map(|line| line.starts_with("diff "))
-            .unwrap_or(false)
-        {
-            self.eat_file_header()?;
+        loop {
+            if let Some(line) = self.lines.peek() {
+                if line.starts_with("diff ") {
+                    self.eat_file_header()?;
+                    break;
+                } else {
+                    // ignore line
+                    self.lines.next().context("no more patch!")?;
+                }
+            } else {
+                // end of file
+                break;
+            }
         }
 
         Ok(hunk)
