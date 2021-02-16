@@ -7,14 +7,19 @@ license = "MIT OR Apache-2.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-regex = "1"
-ignore = "0.4"
-termcolor = "1.1"
-structopt = "0.3"
-serde = { version = "1.0", features = ["derive"] }
-toml = "0.5"
-syntect = "4"
+regex = "1.4.3"
+ignore = "0.4.17"
+termcolor = "1.1.2"
+structopt = "0.3.21"
+serde = { version = "1.0.123", features = ["derive"] }
+toml = "0.5.8"
+syntect = "4.5.0"
 span = { path = "../span" }
 # async-std = { version = "1", features = ["attributes"] }
 # futures = "0.3"
 # num_cpus = "1"
+anyhow = "1.0"
+thiserror = "1.0"
+duct = "0.13"
+log = "0.4"
+env_logger = "0.8"

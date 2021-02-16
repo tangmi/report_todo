@@ -1,7 +1,7 @@
 use crate::console_emitter::{ColoredWriter, Style};
 use regex::Regex;
 use span::*;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct Regexes {
@@ -9,111 +9,131 @@ pub struct Regexes {
     pub match_issue: Regex,
 
     /// Expects a single string interpolation (`{replace_name}`) in which the capture from
-    pub issue_link_format: String,
+    pub issue_link_format: Option<String>,
 
     /// List of regexes of forbidden words
     pub bad_keywords: Vec<Regex>,
 }
 
 #[derive(Debug)]
-pub enum Level<'a> {
-    Warning,
-    Error,
-    Todo(&'a str),
-}
+pub struct TodoError {
+    /// An identifier tracking the issue, e.g. a GitHub issue number.
+    tracking_id: Option<String>,
 
-#[derive(Debug)]
-pub struct TodoError<'a> {
-    level: Level<'a>,
+    /// The line containing the issue, with no trailing whitespace
+    original_line: String,
 
-    span: Span<'a>,
+    /// Length of just the matching issue span.
+    span_len: usize,
+    
+    row: usize,
+    col: usize,
 
-    file_path: &'a Path,
+    file_path: PathBuf,
 
     message: String,
-    help_message: String,
+    help_message: Option<String>,
 }
 
-impl<'a> TodoError<'a> {
+impl TodoError {
     pub fn is_tracked(&self) -> bool {
-        matches!(self.level, Level::Todo(_))
+        self.tracking_id.is_some()
     }
 
-    /// `comment` is potentially multiline.
-    pub fn from_comment(
-        config: &Regexes,
-        file_path: &'a Path,
-        comment: Span<'a>,
-    ) -> Vec<TodoError<'a>> {
+    pub fn from_line(config: &Regexes, file_path: &Path, line: &str, row: usize) -> Vec<TodoError> {
+        let line = line.trim();
+
         let mut issues = Vec::new();
+        if let Some(capture) = config.match_issue.captures(line) {
+            let (todo_start_index, todo_end_index) = {
+                let m = capture.get(0).unwrap();
+                (m.start(), m.end())
+            };
 
-        for line in comment
-            .lines_span()
-            .filter(|line| !line.as_str().trim().is_empty())
-        {
-            if let Some(capture) = config.match_issue.captures(line.as_str()) {
-                let (todo_start_index, todo_end_index) = {
-                    let m = capture.get(0).unwrap();
-                    (m.start(), m.end())
-                };
+            issues.push(TodoError {
+                tracking_id: Some(capture.get(1).unwrap().as_str().to_owned()),
+                file_path: file_path.to_owned(),
 
-                let todo_substr = line
-                    .sub_span(todo_start_index..=todo_end_index)
-                    .unwrap()
-                    .as_str();
+                original_line: line.to_owned(),
+                span_len: line[todo_start_index..].trim().len(),
+                row,
+                col: todo_start_index + 1,
 
-                issues.push(TodoError {
-                    level: Level::Todo(capture.get(1).unwrap().as_str()),
-                    span: line.sub_span(todo_start_index..).unwrap(),
-                    file_path,
-                    message: line.as_str()[todo_end_index + 1..].trim().to_owned(),
-                    help_message: format!(
+                message: line[todo_end_index + 1..].trim().to_owned(),
+                help_message: config.issue_link_format.as_ref().map(|issue_link_format| {
+                    format!(
                         "link: {}",
                         config
                             .match_issue
-                            .replace(todo_substr, config.issue_link_format.as_str())
+                            .replace(
+                                &line[todo_start_index..=todo_end_index],
+                                issue_link_format.as_str()
+                            )
                             .trim()
-                    ),
-                });
-            } else {
-                for keyword in &config.bad_keywords {
-                    if let Some(m) = keyword.find(line.as_str()) {
-                        issues.push(TodoError {
-                            level: Level::Error,
-                            span: line.sub_span(m.start()..).unwrap(),
-                            file_path,
-                            message: format!("{} found without issue number", m.as_str().to_uppercase()),
+                    )
+                }),
+            });
+        } else {
+            for keyword in &config.bad_keywords {
+                if let Some(m) = keyword.find(line) {
+                    issues.push(TodoError {
+                        tracking_id: None,
 
-                            // TODO(#7): Try and generate an example from `config.match_issue` regex?
-                            help_message: "help: create a work item and reference it here (e.g. `TODO(#1): ...`)".to_owned(),
-                        });
-                    }
+                        original_line: line.to_owned(),
+                        span_len: line[m.start()..].len(),
+                        row,
+                        col: m.range().start + 1,
+
+                        file_path: file_path.to_owned(),
+                        message: format!(
+                            "{} found without issue number",
+                            m.as_str().to_uppercase()
+                        ),
+
+                        // TODO(#7): Try and generate an example from `config.match_issue` regex?
+                        help_message: Some(
+                            "help: create a work item and reference it here (e.g. `TODO(#1): ...`)"
+                                .to_owned(),
+                        ),
+                    });
                 }
             }
         }
 
         issues
     }
+
+    /// `comment` is potentially multiline.
+    pub fn from_comment(config: &Regexes, file_path: &Path, comment: Span) -> Vec<TodoError> {
+        comment
+            .lines_span()
+            .filter(|line| !line.as_str().trim().is_empty())
+            .flat_map(|line| {
+                Self::from_line(
+                    config,
+                    file_path,
+                    line.as_str(),
+                    line.start_pos().line_col().0,
+                )
+            })
+            .collect()
+    }
 }
 
 impl ColoredWriter {
-    pub fn write_error(&mut self, todo: &TodoError<'_>) -> std::io::Result<()> {
-        let pos = todo.span.start_pos();
-        let (row, col) = pos.line_col();
-
-        let spacing = " ".repeat(format!("{}", row).len());
-        let underline = " ".repeat(col - 1)
+    pub fn write_error(&mut self, todo: &TodoError) -> std::io::Result<()> {
+        let spacing = " ".repeat(format!("{}", todo.row).len());
+        let underline = " ".repeat(todo.col - 1)
             + &"^".repeat({
                 // `.trim()` ignores the newline characters
-                todo.span.as_str().trim().len()
+                todo.span_len
             });
 
-        match todo.level {
-            Level::Warning => self.write("warning", Style::Warning)?,
-            Level::Error => self.write("error", Style::Error)?,
+        match &todo.tracking_id {
+            None => self.write("error", Style::Error)?,
 
             // TODO(#7): find a way to preserve user-configured pattern?
-            Level::Todo(issue) => self.write(format!("TODO(#{})", issue), Style::Info)?,
+            Some(issue) => self.write(format!("TODO(#{})", issue), Style::Info)?,
         }
         self.write(format!(": {}\n", todo.message), Style::Bold)?;
         self.write(format!("{}--> ", spacing), Style::LineNumber)?;
@@ -121,19 +141,29 @@ impl ColoredWriter {
             format!(
                 "{p}{l}:{c}\n",
                 p = format!("{}:", todo.file_path.display()),
-                l = row,
-                c = col,
+                l = todo.row,
+                c = todo.col,
             ),
             Style::Normal,
         )?;
         self.write(format!("{} |\n", spacing), Style::LineNumber)?;
-        self.write(format!("{} | ", row), Style::LineNumber)?;
-        self.write(format!("{}\n", pos.line_of().trim_end()), Style::Normal)?;
+        self.write(format!("{} | ", todo.row), Style::LineNumber)?;
+        self.write(format!("{}\n", todo.original_line), Style::Normal)?;
         self.write(format!("{} | ", spacing), Style::LineNumber)?;
-        self.write(format!("{}\n", underline), Style::Normal)?;
+        self.write(
+            format!("{}\n", underline),
+            if todo.tracking_id.is_some() {
+                Style::Info
+            } else {
+                Style::Error
+            },
+        )?;
         self.write(format!("{} |\n", spacing), Style::LineNumber)?;
-        self.write(format!("{} = ", spacing), Style::LineNumber)?;
-        self.write(format!("{}\n\n", todo.help_message), Style::Normal)?;
+        if let Some(help_message) = &todo.help_message {
+            self.write(format!("{} = ", spacing), Style::LineNumber)?;
+            self.write(format!("{}\n", help_message), Style::Normal)?;
+        }
+        self.write("\n", Style::Normal)?;
 
         Ok(())
     }
