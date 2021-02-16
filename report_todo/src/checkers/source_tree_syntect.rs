@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use ignore::{DirEntry, WalkState};
+use ignore::WalkState;
 use log::debug;
 use span::Span;
 

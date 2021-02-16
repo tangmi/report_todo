@@ -25,7 +25,7 @@ pub struct TodoError {
 
     /// Length of just the matching issue span.
     span_len: usize,
-    
+
     row: usize,
     col: usize,
 
@@ -41,8 +41,6 @@ impl TodoError {
     }
 
     pub fn from_line(config: &Regexes, file_path: &Path, line: &str, row: usize) -> Vec<TodoError> {
-        let line = line.trim();
-
         let mut issues = Vec::new();
         if let Some(capture) = config.match_issue.captures(line) {
             let (todo_start_index, todo_end_index) = {
@@ -80,7 +78,7 @@ impl TodoError {
                         tracking_id: None,
 
                         original_line: line.to_owned(),
-                        span_len: line[m.start()..].len(),
+                        span_len: line[m.start()..].trim().len(),
                         row,
                         col: m.range().start + 1,
 
@@ -122,8 +120,15 @@ impl TodoError {
 
 impl ColoredWriter {
     pub fn write_error(&mut self, todo: &TodoError) -> std::io::Result<()> {
+        let line_trimmed = todo.original_line.trim();
+        let display_col = todo.col
+            - todo
+                .original_line
+                .find(|c| !char::is_whitespace(c))
+                .unwrap_or(0);
+
         let spacing = " ".repeat(format!("{}", todo.row).len());
-        let underline = " ".repeat(todo.col - 1)
+        let underline = " ".repeat(display_col - 1)
             + &"^".repeat({
                 // `.trim()` ignores the newline characters
                 todo.span_len
@@ -148,7 +153,7 @@ impl ColoredWriter {
         )?;
         self.write(format!("{} |\n", spacing), Style::LineNumber)?;
         self.write(format!("{} | ", todo.row), Style::LineNumber)?;
-        self.write(format!("{}\n", todo.original_line), Style::Normal)?;
+        self.write(format!("{}\n", line_trimmed), Style::Normal)?;
         self.write(format!("{} | ", spacing), Style::LineNumber)?;
         self.write(
             format!("{}\n", underline),
