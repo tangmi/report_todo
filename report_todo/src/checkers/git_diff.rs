@@ -109,6 +109,7 @@ impl<'a> UnifiedDiffParser<'a> {
     }
 
     fn eat_file_header(&mut self) -> anyhow::Result<()> {
+        // Advance to the file indicator marker(s).
         loop {
             let line = self
                 .lines
@@ -214,10 +215,13 @@ impl<'a> UnifiedDiffParser<'a> {
             hunk.added.push(ChangedLine { line, row })
         }
 
+        // Advance to the next file or next hunk.
         loop {
             if let Some(line) = self.lines.peek() {
                 if line.starts_with("diff ") {
                     self.eat_file_header()?;
+                    break;
+                } else if line.starts_with("@@ ") {
                     break;
                 } else {
                     // ignore line
