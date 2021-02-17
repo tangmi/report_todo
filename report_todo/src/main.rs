@@ -20,6 +20,7 @@ struct Opt {
     #[structopt(flatten)]
     config: Config,
 
+    /// Find issues only in the current branch. Assumes the branch is forked off the upstream remote HEAD.
     #[structopt(long = "diff")]
     parse_diff: bool,
 
